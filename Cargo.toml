@@ -1,0 +1,14 @@
+[package]
+name = "relog"
+version = "1.0.0"
+edition = "2024"
+description = "Cut releases from a Keep a Changelog `[Unreleased]` section"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
