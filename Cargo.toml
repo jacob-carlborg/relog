@@ -1,8 +1,8 @@
 [package]
-name = "kacr"
+name = "relog"
 version = "0.1.0"
 edition = "2024"
-description = "Keep A Changelog Release — automate changelog-driven releases"
+description = "Cut releases from a Keep a Changelog `[Unreleased]` section"
 license = "MIT"
 
 [dependencies]

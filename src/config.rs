@@ -88,7 +88,7 @@ mod tests {
 
     fn tmp_dir() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
-            "kacr-test-{}-{}",
+            "relog-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

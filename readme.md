@@ -1,11 +1,14 @@
-# kacr — Keep A Changelog Release
+# relog
 
 A small CLI that cuts a release driven by your `[Unreleased]` section in a
 [Keep a Changelog](https://keepachangelog.com/) formatted file. Project- and
 language-agnostic — it works for any project with a KaC-style changelog and a
 GitHub-style remote.
 
-Given a clean working tree, `kacr`:
+The name is short for *release log* — and `relog` literally re-logs the
+`[Unreleased]` work as a versioned entry.
+
+Given a clean working tree, `relog`:
 
 1. Detects the bump type (major/minor/patch) from the subheaders under `[Unreleased]`.
 2. Rewrites the changelog: inserts a `## [X.Y.Z] - YYYY-MM-DD` header, updates
@@ -17,27 +20,27 @@ Given a clean working tree, `kacr`:
 ## Install
 
 Download a static binary for your platform from the
-[releases page](https://github.com/OWNER/kacr/releases) and put it on your `$PATH`.
+[releases page](https://github.com/OWNER/relog/releases) and put it on your `$PATH`.
 
 Or build from source (requires Rust 1.85+):
 
 ```
-cargo install --git https://github.com/OWNER/kacr
+cargo install --git https://github.com/OWNER/relog
 ```
 
 ## Usage
 
 ```
-kacr [VERSION] [--dry-run] [--chdir DIR]
+relog [VERSION] [--dry-run] [--chdir DIR]
 ```
 
 Auto-detect the bump from the changelog:
 
 ```
-$ kacr
+$ relog
 Releasing 0.13.0 (previous: 0.12.0)
   tag:  v0.13.0
-  date: 2026-05-02
+  date: 2026-05-03
 ...
 Push master and tag to origin? [y/N]
 ```
@@ -45,7 +48,7 @@ Push master and tag to origin? [y/N]
 Or pass an explicit version:
 
 ```
-$ kacr 1.0.0
+$ relog 1.0.0
 ```
 
 Use `--dry-run` to preview without making changes.
@@ -63,7 +66,7 @@ The bump kind is decided by the `###` subheaders under `## [Unreleased]`:
 Higher-precedence rules win: a section with both `### Added` and `### Removed`
 is a major bump.
 
-If the `[Unreleased]` section is empty, `kacr` refuses to release.
+If the `[Unreleased]` section is empty, `relog` refuses to release.
 
 ## Configuration: `.release.toml`
 

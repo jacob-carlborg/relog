@@ -71,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bin="target/${{ matrix.target }}/release/kacr"
+          bin="target/${{ matrix.target }}/release/relog"
           file "$bin"
           if ! file "$bin" | grep -q 'statically linked'; then
             echo "::error::binary is not statically linked" >&2
@@ -89,40 +89,39 @@ jobs:
         run: |
           set -euo pipefail
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          name="kacr-v${version}-${{ matrix.target }}"
+          name="relog-v${version}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          cp "target/${{ matrix.target }}/release/kacr" "dist/${name}/"
+          cp "target/${{ matrix.target }}/release/relog" "dist/${name}/"
           cp readme.md "dist/${name}/" 2>/dev/null || true
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
           shasum -a 256 "dist/${name}.tar.gz" | awk '{print $1 "  '"${name}.tar.gz"'"}' > "dist/${name}.tar.gz.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kacr-${{ matrix.target }}
+          name: relog-${{ matrix.target }}
           path: |
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
 
-  release:
-    name: Create GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Create draft release with gh
+      # Each matrix entry attaches its own artifacts to the draft release. The
+      # first entry to run creates the release; subsequent entries fall through
+      # to `gh release upload`. This keeps the release work as a step inside the
+      # build job rather than a separate job that has to wait for the matrix.
+      - name: Attach to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --draft \
-            --generate-notes \
-            dist/*.tar.gz dist/*.sha256
+          tag="$GITHUB_REF_NAME"
+          gh release create "$tag" \
+              --title "$tag" \
+              --draft \
+              --generate-notes \
+              dist/*.tar.gz dist/*.sha256 \
+            || gh release upload "$tag" \
+              dist/*.tar.gz dist/*.sha256 \
+              --clobber

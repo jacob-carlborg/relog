@@ -9,9 +9,9 @@ use crate::release::Plan;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "kacr",
+    name = "relog",
     version,
-    about = "Keep A Changelog Release — automate changelog-driven releases",
+    about = "Cut releases from a Keep a Changelog `[Unreleased]` section",
     long_about = None,
 )]
 struct Cli {
