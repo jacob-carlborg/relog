@@ -11,14 +11,7 @@ pub struct Config {
     pub changelog: PathBuf,
     pub branch: String,
     pub remote: String,
-    pub hooks: Hooks,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Hooks {
     pub pre_commit: Vec<String>,
-    pub post_tag: Vec<String>,
-    pub pre_push: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -26,7 +19,7 @@ struct RawConfig {
     changelog: Option<String>,
     branch: Option<String>,
     remote: Option<String>,
-    hooks: Hooks,
+    pre_commit: Vec<String>,
 }
 
 impl Config {
@@ -57,7 +50,7 @@ impl Config {
             changelog,
             branch: raw.branch.unwrap_or_else(|| "master".to_string()),
             remote: raw.remote.unwrap_or_else(|| "origin".to_string()),
-            hooks: raw.hooks,
+            pre_commit: raw.pre_commit,
         })
     }
 }
@@ -67,9 +60,8 @@ impl Config {
 /// Format:
 ///   - One assignment per line; blank lines and `#` comments are ignored.
 ///   - Values are not quoted; everything after the first `=` (trimmed) is the value.
-///   - Hook keys (`pre_commit`, `post_tag`, `pre_push`) may repeat; each occurrence
-///     appends one command. Commands are passed to `sh -c`, so chain with `&&` or
-///     `;` for compound steps.
+///   - The `pre_commit` key may repeat; each occurrence appends one command.
+///     Commands are passed to `sh -c`, so chain with `&&` or `;` for compound steps.
 fn parse(text: &str) -> Result<RawConfig> {
     let mut raw = RawConfig::default();
     for (i, line) in text.lines().enumerate() {
@@ -88,9 +80,7 @@ fn parse(text: &str) -> Result<RawConfig> {
             "changelog" => raw.changelog = Some(value),
             "branch" => raw.branch = Some(value),
             "remote" => raw.remote = Some(value),
-            "pre_commit" => raw.hooks.pre_commit.push(value),
-            "post_tag" => raw.hooks.post_tag.push(value),
-            "pre_push" => raw.hooks.pre_push.push(value),
+            "pre_commit" => raw.pre_commit.push(value),
             _ => bail!("line {lineno}: unknown key `{key}`"),
         }
     }
@@ -130,7 +120,7 @@ mod tests {
         assert_eq!(cfg.branch, "master");
         assert_eq!(cfg.remote, "origin");
         assert_eq!(cfg.changelog, dir.join("changelog.md"));
-        assert!(cfg.hooks.pre_commit.is_empty());
+        assert!(cfg.pre_commit.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -147,7 +137,6 @@ branch = main
 remote = upstream
 
 pre_commit = ./scripts/update-readme.sh
-post_tag = git tag -f v$RELEASE_MAJOR
 ",
         )
         .unwrap();
@@ -155,9 +144,7 @@ post_tag = git tag -f v$RELEASE_MAJOR
         assert_eq!(cfg.branch, "main");
         assert_eq!(cfg.remote, "upstream");
         assert_eq!(cfg.changelog, dir.join("CHANGELOG.md"));
-        assert_eq!(cfg.hooks.pre_commit, vec!["./scripts/update-readme.sh"]);
-        assert_eq!(cfg.hooks.post_tag, vec!["git tag -f v$RELEASE_MAJOR"]);
-        assert!(cfg.hooks.pre_push.is_empty());
+        assert_eq!(cfg.pre_commit, vec!["./scripts/update-readme.sh"]);
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -175,7 +162,7 @@ pre_commit = third
         )
         .unwrap();
         let cfg = Config::load(&dir).unwrap();
-        assert_eq!(cfg.hooks.pre_commit, vec!["first", "second", "third"]);
+        assert_eq!(cfg.pre_commit, vec!["first", "second", "third"]);
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -205,13 +192,13 @@ pre_commit = third
         fs::write(dir.join("changelog.md"), "# x").unwrap();
         fs::write(
             dir.join(".release.conf"),
-            "post_tag = sh -c 'git config user.email=ci@example.com && git tag x'\n",
+            "pre_commit = sh -c 'git config user.email=ci@example.com && git add x'\n",
         )
         .unwrap();
         let cfg = Config::load(&dir).unwrap();
         assert_eq!(
-            cfg.hooks.post_tag,
-            vec!["sh -c 'git config user.email=ci@example.com && git tag x'"]
+            cfg.pre_commit,
+            vec!["sh -c 'git config user.email=ci@example.com && git add x'"]
         );
         fs::remove_dir_all(&dir).ok();
     }

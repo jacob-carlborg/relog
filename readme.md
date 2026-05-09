@@ -14,7 +14,7 @@ Given a clean working tree, `relog`:
 2. Rewrites the changelog: inserts a `## [X.Y.Z] - YYYY-MM-DD` header, updates
    the `[Unreleased]` reference link, adds a new compare link.
 3. Commits the changelog and creates an annotated git tag.
-4. Runs configurable hooks at three phases (`pre_commit`, `post_tag`, `pre_push`).
+4. Runs configurable `pre_commit` hooks before staging and committing.
 5. Prompts before pushing to the remote.
 
 ## Install
@@ -78,11 +78,9 @@ changelog = changelog.md
 branch    = master
 remote    = origin
 
-# Hook keys may repeat; each occurrence is one command. Run before staging
-# the changelog, after the annotated tag is created, and before pushing.
+# `pre_commit` may repeat; each occurrence is one command run before
+# staging the changelog and committing.
 # pre_commit = ...
-# post_tag   = ...
-# pre_push   = ...
 ```
 
 Format: one `key = value` per line. Blank lines and `#` comments are ignored.
@@ -94,7 +92,8 @@ Codeberg, sourcehut, …) works without configuration.
 
 ## Hooks
 
-Each hook is a shell command run via `sh -c` in the repository root. These
+Each `pre_commit` hook is a shell command run via `sh -c` in the repository
+root, after the changelog has been rewritten and before it is staged. These
 environment variables are exported to every hook:
 
 | Variable | Example |
@@ -104,18 +103,15 @@ environment variables are exported to every hook:
 | `RELEASE_TAG` | `v1.2.3` |
 | `RELEASE_MAJOR` | `1` |
 
-A hook that exits non-zero aborts the release.
+A hook that exits non-zero aborts the release. Anything the hook modifies
+should be staged by the hook itself (`git add ...`) — only the changelog is
+staged automatically.
 
-### Example: keep a major-version tag in sync (GitHub Actions style)
-
-For projects where users reference `action@v1`, this `.release.conf` rewrites
-`readme.md` and force-moves the `v1` tag on each release:
+### Example: rewrite a version reference in the README
 
 ```ini
 pre_commit = sed -i "" "s|action@v$RELEASE_PREV_VERSION|action@v$RELEASE_VERSION|g" readme.md
 pre_commit = git add readme.md
-post_tag   = git tag -f -a v$RELEASE_MAJOR -m "Release $RELEASE_VERSION"
-pre_push   = git push -f origin v$RELEASE_MAJOR
 ```
 
 For multi-step commands, chain with `&&` — each hook is passed to `sh -c`.

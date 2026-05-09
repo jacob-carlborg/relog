@@ -8,7 +8,7 @@ use crate::bump;
 use crate::changelog::{Changelog, ReleaseOpts, Version};
 use crate::config::Config;
 use crate::git::Git;
-use crate::hooks::{self, Phase, ReleaseEnv};
+use crate::hooks::{self, ReleaseEnv};
 
 pub struct Plan {
     pub config: Config,
@@ -80,22 +80,18 @@ impl Plan {
 
     /// Print what would be done without making any changes.
     pub fn dry_run(&self) {
-        let env = self.release_env();
         println!("[dry-run] Would update {}:", self.config.changelog.display());
         println!("  - Add header: ## [{}] - {}", self.version, self.date);
         println!("  - Add reference link for {}", self.version);
         println!("  - Update [Unreleased] reference link");
-        hooks::describe(Phase::PreCommit, &self.config.hooks.pre_commit);
+        hooks::describe(&self.config.pre_commit);
         println!("[dry-run] Would commit: Release {}", self.version);
         println!("[dry-run] Would create annotated tag: {}", self.tag);
-        hooks::describe(Phase::PostTag, &self.config.hooks.post_tag);
-        hooks::describe(Phase::PrePush, &self.config.hooks.pre_push);
         println!("[dry-run] Would push {} and tag: {}", self.config.branch, self.tag);
-        let _ = env;
     }
 
     /// Execute the release: validate branch + worktree, rewrite changelog, commit, tag,
-    /// run hooks at the appropriate phases, prompt to push.
+    /// run pre_commit hooks, prompt to push.
     pub fn execute(&self) -> Result<()> {
         // --- Validate branch and working tree -------------------------------
         let current = self.git.current_branch()?;
@@ -123,16 +119,13 @@ impl Plan {
             .with_context(|| format!("writing {}", self.config.changelog.display()))?;
 
         // --- pre_commit hooks (e.g. README rewrite) ------------------------
-        hooks::run(Phase::PreCommit, &self.config.hooks.pre_commit, &self.config.root, &env)?;
+        hooks::run(&self.config.pre_commit, &self.config.root, &env)?;
 
         // --- Stage + commit + tag ------------------------------------------
         let changelog_rel = relative_to(&self.config.changelog, &self.config.root);
         self.git.add(&[&changelog_rel])?;
         self.git.commit(&format!("Release {}", self.version))?;
         self.git.tag_annotated(&self.tag, &format!("Release {}", self.version))?;
-
-        // --- post_tag hooks (e.g. major-tag move for the action variant) ---
-        hooks::run(Phase::PostTag, &self.config.hooks.post_tag, &self.config.root, &env)?;
 
         println!();
         println!("Release {} committed and tagged ({}).", self.version, self.tag);
@@ -154,9 +147,6 @@ impl Plan {
             println!("  git push {} {}", self.config.remote, self.tag);
             return Ok(());
         }
-
-        // --- pre_push hooks -------------------------------------------------
-        hooks::run(Phase::PrePush, &self.config.hooks.pre_push, &self.config.root, &env)?;
 
         // --- Push -----------------------------------------------------------
         self.git.push(&self.config.remote, &self.config.branch)?;
