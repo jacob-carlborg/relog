@@ -1,8 +1,8 @@
+use std::io::{BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use dialoguer::Confirm;
 
 use crate::bump;
 use crate::changelog::{Changelog, ReleaseOpts, Version};
@@ -132,14 +132,10 @@ impl Plan {
         println!();
 
         // --- Prompt before push --------------------------------------------
-        let push = Confirm::new()
-            .with_prompt(format!(
-                "Push {} and tag to {}?",
-                self.config.branch, self.config.remote
-            ))
-            .default(false)
-            .interact()
-            .unwrap_or(false);
+        let push = confirm_default_no(&format!(
+            "Push {} and tag to {}?",
+            self.config.branch, self.config.remote
+        ));
 
         if !push {
             println!("Not pushed. When ready, run:");
@@ -164,4 +160,22 @@ fn relative_to(path: &Path, base: &Path) -> std::path::PathBuf {
     path.strip_prefix(base)
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Prompt the user with `<message> [y/N] ` and return true only if the first
+/// non-whitespace character of the reply is `y` or `Y`. Empty input, EOF, or
+/// I/O errors all return false.
+fn confirm_default_no(message: &str) -> bool {
+    print!("{message} [y/N] ");
+    if std::io::stdout().flush().is_err() {
+        return false;
+    }
+
+    let mut line = String::new();
+    let stdin = std::io::stdin();
+    if stdin.lock().read_line(&mut line).is_err() {
+        return false;
+    }
+
+    matches!(line.trim_start().chars().next(), Some('y') | Some('Y'))
 }
