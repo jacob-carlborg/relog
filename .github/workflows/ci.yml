@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+  pull_request:
 
 permissions:
   contents: write
@@ -12,45 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: cargo test
-        run: cargo test --locked
-
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-13
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04-arm
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Install musl tools
-        if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Verify tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -63,53 +25,341 @@ jobs:
             exit 1
           fi
 
-      - name: Build
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ----- Linux: native musl (fully static) -----
+          - name: linux-x86_64
+            kind: linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - name: linux-arm64
+            kind: linux
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+
+          # ----- Linux: cross-compiled musl via cargo-zigbuild (tier 2) -----
+          - name: linux-arm
+            kind: linux-zig
+            runner: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+          - name: linux-x86
+            kind: linux-zig
+            runner: ubuntu-latest
+            target: i686-unknown-linux-musl
+
+          # ----- Linux: cross-compiled musl via cargo-zigbuild + build-std (tier 3) -----
+          - name: linux-riscv64
+            kind: linux-zig-tier3
+            runner: ubuntu-latest
+            target: riscv64gc-unknown-linux-musl
+          - name: linux-ppc64le
+            kind: linux-zig-tier3
+            runner: ubuntu-latest
+            target: powerpc64le-unknown-linux-musl
+          - name: linux-s390x
+            kind: linux-zig-tier3
+            runner: ubuntu-latest
+            target: s390x-unknown-linux-musl
+
+          # ----- macOS (oldest deployment target rustc supports per arch) -----
+          - name: macos-x86_64
+            kind: macos
+            runner: macos-13
+            target: x86_64-apple-darwin
+            macos_deployment_target: '10.12'
+          - name: macos-arm64
+            kind: macos
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            macos_deployment_target: '11.0'
+
+          # ----- Windows (oldest is Windows 10 with current rustc) -----
+          - name: windows-x86_64
+            kind: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: windows-arm64
+            kind: windows
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+
+          # ----- OpenBSD -----
+          - name: openbsd-7.8-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: openbsd
+            vm_version: '7.8'
+            vm_arch: x86-64
+          - name: openbsd-7.8-arm64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: openbsd
+            vm_version: '7.8'
+            vm_arch: arm64
+
+          # ----- FreeBSD -----
+          - name: freebsd-15.0-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: freebsd
+            vm_version: '15.0'
+            vm_arch: x86-64
+          - name: freebsd-15.0-arm64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: freebsd
+            vm_version: '15.0'
+            vm_arch: arm64
+          - name: freebsd-14.0-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: freebsd
+            vm_version: '14.0'
+            vm_arch: x86-64
+          - name: freebsd-14.0-arm64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: freebsd
+            vm_version: '14.0'
+            vm_arch: arm64
+
+          # ----- NetBSD -----
+          - name: netbsd-10.0-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: netbsd
+            vm_version: '10.0'
+            vm_arch: x86-64
+          - name: netbsd-10.0-arm64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: netbsd
+            vm_version: '10.0'
+            vm_arch: arm64
+          - name: netbsd-9.4-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: netbsd
+            vm_version: '9.4'
+            vm_arch: x86-64
+
+          # ----- DragonFlyBSD -----
+          - name: dragonflybsd-6.4.2-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: dragonflybsd
+            vm_version: '6.4.2'
+            vm_arch: x86-64
+
+          # ----- MidnightBSD -----
+          - name: midnightbsd-4.0.4-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: midnightbsd
+            vm_version: '4.0.4'
+            vm_arch: x86-64
+
+          # ----- Haiku -----
+          - name: haiku-r1beta5-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: haiku
+            vm_version: 'r1beta5'
+            vm_arch: x86-64
+
+          # ----- OmniOS -----
+          - name: omnios-r151058-x86_64
+            kind: vm
+            runner: ubuntu-latest
+            vm_os: omnios
+            vm_version: 'r151058'
+            vm_arch: x86-64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          if [[ "$tag" != "$crate" ]]; then
+            echo "tag '$GITHUB_REF_NAME' does not match Cargo.toml version '$crate'" >&2
+            exit 1
+          fi
+
+      # ---- Toolchain ----
+      - name: Install Rust toolchain (stable)
+        if: matrix.kind != 'vm' && matrix.kind != 'linux-zig-tier3'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Rust toolchain (nightly + rust-src for build-std)
+        if: matrix.kind == 'linux-zig-tier3'
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.kind != 'vm'
+        with:
+          key: ${{ matrix.target }}
+
+      # ---- Linux: musl-tools for native build ----
+      - name: Install musl tools
+        if: matrix.kind == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # ---- Linux: zig + cargo-zigbuild for cross builds ----
+      - name: Install Zig
+        if: startsWith(matrix.kind, 'linux-zig')
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        if: startsWith(matrix.kind, 'linux-zig')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      # ---- Build ----
+      - name: Build (Linux native musl)
+        if: matrix.kind == 'linux'
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Build (Linux cross via zigbuild)
+        if: matrix.kind == 'linux-zig'
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+
+      - name: Build (Linux cross via zigbuild + build-std)
+        if: matrix.kind == 'linux-zig-tier3'
+        run: |
+          cargo zigbuild --release --locked --target ${{ matrix.target }} \
+            -Z build-std=std,panic_abort
+
+      - name: Build (macOS)
+        if: matrix.kind == 'macos'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Build (Windows)
+        if: matrix.kind == 'windows'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Build (VM)
+        if: matrix.kind == 'vm'
+        uses: cross-platform-actions/action@v0.28.0
+        with:
+          operating_system: ${{ matrix.vm_os }}
+          version: ${{ matrix.vm_version }}
+          architecture: ${{ matrix.vm_arch }}
+          shell: bash
+          sync_files: true
+          run: |
+            set -e
+            case "$(uname -s)" in
+              OpenBSD)     sudo pkg_add -I rust ;;
+              FreeBSD)     sudo pkg install -y rust ;;
+              NetBSD)      sudo pkgin -y install rust ;;
+              DragonFly)   sudo pkg install -y rust ;;
+              MidnightBSD) sudo mport install -y rust ;;
+              Haiku)       pkgman install -y rust_bin ;;
+              SunOS)       sudo pkg install -q rust ;;
+              *)           echo "no rust install recipe for $(uname -s)" >&2; exit 1 ;;
+            esac
+            cargo build --release --locked
+
+      # ---- Verify Linux binaries are fully static ----
       - name: Verify Linux binary is fully static
-        if: contains(matrix.target, 'linux')
+        if: startsWith(matrix.kind, 'linux')
         shell: bash
         run: |
           set -euo pipefail
           bin="target/${{ matrix.target }}/release/relog"
           file "$bin"
+          if file "$bin" | grep -qE 'dynamically linked'; then
+            echo "::error::binary is dynamically linked" >&2
+            exit 1
+          fi
           if ! file "$bin" | grep -q 'statically linked'; then
             echo "::error::binary is not statically linked" >&2
             exit 1
           fi
-          # `ldd` exits non-zero on a static binary; that's the success case.
-          if ldd "$bin" 2>&1 | grep -qv 'not a dynamic executable'; then
-            echo "::error::binary has dynamic dependencies:" >&2
-            ldd "$bin" >&2 || true
+          if command -v readelf >/dev/null && readelf -l "$bin" | grep -q 'INTERP'; then
+            echo "::error::binary has dynamic interpreter" >&2
+            readelf -l "$bin" >&2
             exit 1
           fi
 
+      # ---- Package ----
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          name="relog-v${version}-${{ matrix.target }}"
+          name="relog-v${version}-${{ matrix.name }}"
+
+          bin_name="relog"
+          if [[ "${{ matrix.kind }}" == "windows" ]]; then
+            bin_name="relog.exe"
+          fi
+
+          if [[ "${{ matrix.kind }}" == "vm" ]]; then
+            src="target/release/${bin_name}"
+          else
+            src="target/${{ matrix.target }}/release/${bin_name}"
+          fi
+
           mkdir -p "dist/${name}"
-          cp "target/${{ matrix.target }}/release/relog" "dist/${name}/"
-          cp readme.md "dist/${name}/" 2>/dev/null || true
+          cp "$src" "dist/${name}/"
+          [[ -f readme.md ]] && cp readme.md "dist/${name}/" || true
+
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
-          shasum -a 256 "dist/${name}.tar.gz" | awk '{print $1 "  '"${name}.tar.gz"'"}' > "dist/${name}.tar.gz.sha256"
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: relog-${{ matrix.target }}
+          name: relog-${{ matrix.name }}
           path: |
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
 
-      # Each matrix entry attaches its own artifacts to the draft release. The
-      # first entry to run creates the release; subsequent entries fall through
-      # to `gh release upload`. This keeps the release work as a step inside the
-      # build job rather than a separate job that has to wait for the matrix.
-      - name: Attach to draft release
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or append to draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -117,11 +367,19 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          gh release create "$tag" \
+          ls -la dist/
+          state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          if [[ "$state" == "true" ]]; then
+            echo "Appending to existing draft $tag"
+            gh release upload "$tag" dist/* --clobber
+          elif [[ "$state" == "missing" ]]; then
+            echo "Creating new draft $tag"
+            gh release create "$tag" \
               --title "$tag" \
               --draft \
               --generate-notes \
-              dist/*.tar.gz dist/*.sha256 \
-            || gh release upload "$tag" \
-              dist/*.tar.gz dist/*.sha256 \
-              --clobber
+              dist/*
+          else
+            echo "::error::release $tag exists but is not a draft" >&2
+            exit 1
+          fi
