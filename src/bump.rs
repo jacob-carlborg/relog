@@ -1,6 +1,4 @@
 use anyhow::{Result, bail};
-use regex::Regex;
-use std::sync::OnceLock;
 
 use crate::changelog::Version;
 
@@ -24,15 +22,12 @@ pub fn detect(section: &str) -> Option<BumpKind> {
         return None;
     }
 
-    let has_subheader = |name: &str| {
-        let re_str = format!(r"(?mi)^###\s+{}\s*$", regex::escape(name));
-        Regex::new(&re_str).unwrap().is_match(section)
-    };
+    let has_subheader = |name: &str| has_subheader(section, name);
 
     if has_subheader("Removed") {
         return Some(BumpKind::Major);
     }
-    if breaking_regex().is_match(section) {
+    if section.to_ascii_lowercase().contains("breaking") {
         return Some(BumpKind::Major);
     }
     if has_subheader("Added") || has_subheader("Changed") || has_subheader("Deprecated") {
@@ -59,9 +54,24 @@ pub fn next_version(prev: Version, section: &str) -> Result<Version> {
     }
 }
 
-fn breaking_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)breaking").unwrap())
+/// Whether `text` contains a Keep a Changelog subheader line of the form
+/// `### <Name>` (case-insensitive, optional surrounding whitespace, one or
+/// more spaces/tabs between `###` and the name).
+fn has_subheader(text: &str, name: &str) -> bool {
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("###") else {
+            continue;
+        };
+        // Require at least one whitespace character after `###`.
+        if !rest.starts_with(|c: char| c.is_whitespace()) {
+            continue;
+        }
+        if rest.trim().eq_ignore_ascii_case(name) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

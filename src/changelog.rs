@@ -1,9 +1,7 @@
 use std::fmt;
-use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::NaiveDate;
-use regex::Regex;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Version(pub u32, pub u32, pub u32);
@@ -59,17 +57,23 @@ impl Changelog {
 
     /// The most recent released version (the first `## [X.Y.Z]` header in the file).
     pub fn current_version(&self) -> Option<Version> {
-        let re = version_header_regex();
-        let caps = re.captures(&self.contents)?;
-        Version::parse(caps.get(1)?.as_str()).ok()
+        for line in self.contents.lines() {
+            if let Some(v) = parse_version_header(line) {
+                return Some(v);
+            }
+        }
+        None
     }
 
     /// Base URL for compare links, derived from the existing `[Unreleased]: ...` reference link.
     /// E.g. "https://github.com/cross-platform-actions/openbsd-builder".
     pub fn repo_url(&self) -> Option<String> {
-        let re = unreleased_ref_regex();
-        let caps = re.captures(&self.contents)?;
-        Some(caps.get(1)?.as_str().to_string())
+        for line in self.contents.lines() {
+            if let Some(url) = parse_unreleased_compare_url(line) {
+                return Some(url.to_string());
+            }
+        }
+        None
     }
 
     /// Produce the rewritten changelog for a new release.
@@ -82,59 +86,101 @@ impl Changelog {
             .repo_url()
             .context("could not find an [Unreleased]: reference link to derive the repo URL from")?;
 
-        let new_header = format!(
-            "## [Unreleased]\n\n## [{ver}] - {date}",
-            ver = opts.version,
-            date = opts.date,
-        );
-        let unreleased_re = Regex::new(r"(?m)^## \[Unreleased\]\s*$").unwrap();
-        let after_header = unreleased_re
-            .replace(&self.contents, new_header.as_str())
-            .into_owned();
-        if after_header == self.contents {
-            bail!("could not locate the `## [Unreleased]` header in the changelog");
-        }
-
         let new_unreleased_ref = format!("[Unreleased]: {base_url}/compare/v{ver}...HEAD", ver = opts.version);
-        let unreleased_ref_re = unreleased_ref_regex();
-        let after_unreleased_ref = unreleased_ref_re
-            .replace(&after_header, new_unreleased_ref.as_str())
-            .into_owned();
-        if after_unreleased_ref == after_header {
-            bail!("could not locate the `[Unreleased]: ...` reference link in the changelog");
-        }
-
         let new_version_ref = format!(
-            "\n\n[{ver}]: {base_url}/compare/v{prev}...v{ver}",
+            "[{ver}]: {base_url}/compare/v{prev}...v{ver}",
             ver = opts.version,
             prev = opts.prev_version,
         );
-        // Insert the new version reference link after the [Unreleased] reference line.
-        let unreleased_ref_line_re =
-            Regex::new(r"(?m)^\[Unreleased\]:\s*[^\r\n]+$").unwrap();
-        let final_contents = unreleased_ref_line_re
-            .replace(&after_unreleased_ref, |caps: &regex::Captures<'_>| {
-                let mut s = caps[0].to_string();
-                s.push_str(&new_version_ref);
-                s
-            })
-            .into_owned();
+        let new_version_header = format!("## [{ver}] - {date}", ver = opts.version, date = opts.date);
 
-        Ok(final_contents)
+        let mut out = String::with_capacity(self.contents.len() + 256);
+        let mut replaced_unreleased_header = false;
+        let mut replaced_unreleased_ref = false;
+
+        for line in self.contents.split_inclusive('\n') {
+            let line_no_nl = line.strip_suffix('\n').unwrap_or(line);
+
+            if !replaced_unreleased_header && line_no_nl.trim() == "## [Unreleased]" {
+                // Keep the original `## [Unreleased]` line exactly as it was
+                // (preserving its trailing newline, if any), then append a
+                // blank line and the new version header.
+                out.push_str(line);
+                out.push('\n');
+                out.push_str(&new_version_header);
+                // Match the original's trailing newline behavior: the regex
+                // replacement preserves the line ending of the matched line.
+                // The replacement string ends without `\n`, but the matched
+                // text didn't include the newline either — the newline that
+                // followed the original line is still in the input. Since we
+                // already pushed `line` (which includes the original newline),
+                // we need a newline after the new header too only if the
+                // original line had one. Check the original line.
+                if line.ends_with('\n') {
+                    out.push('\n');
+                }
+                replaced_unreleased_header = true;
+                continue;
+            }
+
+            if !replaced_unreleased_ref && parse_unreleased_compare_url(line_no_nl).is_some() {
+                // Replace the line content with the new `[Unreleased]:` ref
+                // and append a blank line + the new version reference link.
+                // This mirrors the original two-pass regex rewrite where the
+                // matched line text becomes:
+                //   "[Unreleased]: NEW\n\n[X.Y.Z]: …"
+                // and the original trailing newline of the matched line is
+                // preserved verbatim afterwards.
+                out.push_str(&new_unreleased_ref);
+                out.push('\n');
+                out.push('\n');
+                out.push_str(&new_version_ref);
+                if line.ends_with('\n') {
+                    out.push('\n');
+                }
+                replaced_unreleased_ref = true;
+                continue;
+            }
+
+            out.push_str(line);
+        }
+
+        if !replaced_unreleased_header {
+            bail!("could not locate the `## [Unreleased]` header in the changelog");
+        }
+        if !replaced_unreleased_ref {
+            bail!("could not locate the `[Unreleased]: ...` reference link in the changelog");
+        }
+
+        Ok(out)
     }
 }
 
-fn version_header_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?m)^## \[(\d+\.\d+\.\d+)\]").unwrap())
+/// Parse a `## [X.Y.Z]` (or `## [X.Y.Z] - date`) header line and return the
+/// version. Returns `None` if the line is not such a header.
+fn parse_version_header(line: &str) -> Option<Version> {
+    let rest = line.strip_prefix("## [")?;
+    let end = rest.find(']')?;
+    Version::parse(&rest[..end]).ok()
 }
 
-fn unreleased_ref_regex() -> &'static Regex {
-    // Captures the base URL (everything before "/compare/")
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?m)^\[Unreleased\]:\s*(\S+?)/compare/v\d+\.\d+\.\d+\.\.\.HEAD\s*$").unwrap()
-    })
+/// Parse a `[Unreleased]: <base>/compare/vX.Y.Z...HEAD` line and return the
+/// base URL slice. Returns `None` if the line does not match this exact shape.
+fn parse_unreleased_compare_url(line: &str) -> Option<&str> {
+    // Strip CR if present (windows line endings) and trim trailing whitespace.
+    let line = line.trim_end();
+    let rest = line.strip_prefix("[Unreleased]:")?;
+    let rest = rest.trim_start();
+    // `rest` should be a URL with no internal whitespace, ending in
+    // `/compare/vX.Y.Z...HEAD`.
+    if rest.contains(char::is_whitespace) {
+        return None;
+    }
+    let suffix = rest.strip_suffix("...HEAD")?;
+    let (base, version_part) = suffix.rsplit_once("/compare/v")?;
+    // Validate that `version_part` parses as X.Y.Z.
+    Version::parse(version_part).ok()?;
+    Some(base)
 }
 
 /// Find the byte range of the first line in `text` for which `pred(line)` is true.
