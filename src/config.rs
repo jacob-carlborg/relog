@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use serde::Deserialize;
+use anyhow::{Context, Result, bail};
 
-const CONFIG_FILENAME: &str = ".release.toml";
+const CONFIG_FILENAME: &str = ".release.conf";
 const CHANGELOG_CANDIDATES: &[&str] = &["changelog.md", "CHANGELOG.md", "Changelog.md"];
 
 #[derive(Debug, Clone)]
@@ -22,42 +21,35 @@ pub struct Hooks {
     pub pre_push: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default)]
 struct RawConfig {
     changelog: Option<String>,
     branch: Option<String>,
     remote: Option<String>,
-    #[serde(default)]
-    hooks: RawHooks,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawHooks {
-    #[serde(default)]
-    pre_commit: Vec<String>,
-    #[serde(default)]
-    post_tag: Vec<String>,
-    #[serde(default)]
-    pre_push: Vec<String>,
+    hooks: Hooks,
 }
 
 impl Config {
-    /// Load config from `<root>/.release.toml`, falling back to defaults if absent.
+    /// Load config from `<root>/.release.conf`, falling back to defaults if absent.
     pub fn load(root: &Path) -> Result<Self> {
         let path = root.join(CONFIG_FILENAME);
         let raw = if path.exists() {
             let text = std::fs::read_to_string(&path)
                 .with_context(|| format!("reading {}", path.display()))?;
-            toml::from_str::<RawConfig>(&text)
-                .with_context(|| format!("parsing {}", path.display()))?
+            parse(&text).with_context(|| format!("parsing {}", path.display()))?
         } else {
             RawConfig::default()
         };
 
         let changelog = match raw.changelog {
             Some(name) => root.join(name),
-            None => detect_changelog(root)
-                .with_context(|| format!("no changelog found in {} (tried {:?})", root.display(), CHANGELOG_CANDIDATES))?,
+            None => detect_changelog(root).with_context(|| {
+                format!(
+                    "no changelog found in {} (tried {:?})",
+                    root.display(),
+                    CHANGELOG_CANDIDATES
+                )
+            })?,
         };
 
         Ok(Self {
@@ -65,13 +57,44 @@ impl Config {
             changelog,
             branch: raw.branch.unwrap_or_else(|| "master".to_string()),
             remote: raw.remote.unwrap_or_else(|| "origin".to_string()),
-            hooks: Hooks {
-                pre_commit: raw.hooks.pre_commit,
-                post_tag: raw.hooks.post_tag,
-                pre_push: raw.hooks.pre_push,
-            },
+            hooks: raw.hooks,
         })
     }
+}
+
+/// Parse a `key = value` config file.
+///
+/// Format:
+///   - One assignment per line; blank lines and `#` comments are ignored.
+///   - Values are not quoted; everything after the first `=` (trimmed) is the value.
+///   - Hook keys (`pre_commit`, `post_tag`, `pre_push`) may repeat; each occurrence
+///     appends one command. Commands are passed to `sh -c`, so chain with `&&` or
+///     `;` for compound steps.
+fn parse(text: &str) -> Result<RawConfig> {
+    let mut raw = RawConfig::default();
+    for (i, line) in text.lines().enumerate() {
+        let lineno = i + 1;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (key, value) = match trimmed.split_once('=') {
+            Some(kv) => kv,
+            None => bail!("line {lineno}: expected `key = value`, got: {trimmed}"),
+        };
+        let key = key.trim();
+        let value = value.trim().to_string();
+        match key {
+            "changelog" => raw.changelog = Some(value),
+            "branch" => raw.branch = Some(value),
+            "remote" => raw.remote = Some(value),
+            "pre_commit" => raw.hooks.pre_commit.push(value),
+            "post_tag" => raw.hooks.post_tag.push(value),
+            "pre_push" => raw.hooks.pre_push.push(value),
+            _ => bail!("line {lineno}: unknown key `{key}`"),
+        }
+    }
+    Ok(raw)
 }
 
 fn detect_changelog(root: &Path) -> Option<PathBuf> {
@@ -116,16 +139,16 @@ mod tests {
         let dir = tmp_dir();
         fs::write(dir.join("CHANGELOG.md"), "# x").unwrap();
         fs::write(
-            dir.join(".release.toml"),
-            r#"
-changelog = "CHANGELOG.md"
-branch = "main"
-remote = "upstream"
+            dir.join(".release.conf"),
+            "\
+# example config
+changelog = CHANGELOG.md
+branch = main
+remote = upstream
 
-[hooks]
-pre_commit = ["./scripts/update-readme.sh"]
-post_tag = ["git tag -f v$RELEASE_MAJOR"]
-"#,
+pre_commit = ./scripts/update-readme.sh
+post_tag = git tag -f v$RELEASE_MAJOR
+",
         )
         .unwrap();
         let cfg = Config::load(&dir).unwrap();
@@ -135,6 +158,61 @@ post_tag = ["git tag -f v$RELEASE_MAJOR"]
         assert_eq!(cfg.hooks.pre_commit, vec!["./scripts/update-readme.sh"]);
         assert_eq!(cfg.hooks.post_tag, vec!["git tag -f v$RELEASE_MAJOR"]);
         assert!(cfg.hooks.pre_push.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn repeated_hook_keys_accumulate_in_order() {
+        let dir = tmp_dir();
+        fs::write(dir.join("changelog.md"), "# x").unwrap();
+        fs::write(
+            dir.join(".release.conf"),
+            "\
+pre_commit = first
+pre_commit = second
+pre_commit = third
+",
+        )
+        .unwrap();
+        let cfg = Config::load(&dir).unwrap();
+        assert_eq!(cfg.hooks.pre_commit, vec!["first", "second", "third"]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unknown_key_is_a_parse_error() {
+        let dir = tmp_dir();
+        fs::write(dir.join("changelog.md"), "# x").unwrap();
+        fs::write(dir.join(".release.conf"), "wat = 1\n").unwrap();
+        let err = Config::load(&dir).unwrap_err();
+        assert!(err.to_string().contains("parsing") || format!("{err:#}").contains("unknown key"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn line_without_equals_is_a_parse_error() {
+        let dir = tmp_dir();
+        fs::write(dir.join("changelog.md"), "# x").unwrap();
+        fs::write(dir.join(".release.conf"), "branch main\n").unwrap();
+        let err = Config::load(&dir).unwrap_err();
+        assert!(format!("{err:#}").contains("expected `key = value`"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn value_with_equals_keeps_everything_after_the_first() {
+        let dir = tmp_dir();
+        fs::write(dir.join("changelog.md"), "# x").unwrap();
+        fs::write(
+            dir.join(".release.conf"),
+            "post_tag = sh -c 'git config user.email=ci@example.com && git tag x'\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&dir).unwrap();
+        assert_eq!(
+            cfg.hooks.post_tag,
+            vec!["sh -c 'git config user.email=ci@example.com && git tag x'"]
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
