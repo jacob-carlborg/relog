@@ -2,11 +2,11 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use chrono::Local;
 
 use crate::bump;
 use crate::changelog::{Changelog, ReleaseOpts, Version};
 use crate::config::Config;
+use crate::date::Date;
 use crate::git::Git;
 use crate::hooks::{self, ReleaseEnv};
 
@@ -17,7 +17,7 @@ pub struct Plan {
     pub prev_version: Version,
     pub version: Version,
     pub tag: String,
-    pub date: chrono::NaiveDate,
+    pub date: Date,
 }
 
 impl Plan {
@@ -51,7 +51,7 @@ impl Plan {
 
         Ok(Self {
             tag: format!("v{version}"),
-            date: Local::now().date_naive(),
+            date: Date::today_utc(),
             config,
             git,
             changelog,

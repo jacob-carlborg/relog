@@ -1,7 +1,8 @@
 use std::fmt;
 
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::NaiveDate;
+
+use crate::date::Date;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Version(pub u32, pub u32, pub u32);
@@ -32,7 +33,7 @@ pub struct Changelog {
 pub struct ReleaseOpts {
     pub version: Version,
     pub prev_version: Version,
-    pub date: NaiveDate,
+    pub date: Date,
 }
 
 impl Changelog {
@@ -276,7 +277,7 @@ mod tests {
         let opts = ReleaseOpts {
             version: Version(0, 13, 0),
             prev_version: Version(0, 12, 0),
-            date: NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(),
+            date: Date { year: 2026, month: 5, day: 2 },
         };
         let out = cl.release(&opts).unwrap();
 
@@ -300,7 +301,7 @@ mod tests {
         let opts = ReleaseOpts {
             version: Version(0, 13, 0),
             prev_version: Version(0, 12, 0),
-            date: NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(),
+            date: Date { year: 2026, month: 5, day: 2 },
         };
         let out = cl.release(&opts).unwrap();
         assert!(out.contains("## [0.13.0] - 2026-05-02"));
@@ -313,7 +314,7 @@ mod tests {
         let opts = ReleaseOpts {
             version: Version(0, 12, 0),
             prev_version: Version(0, 12, 0),
-            date: NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(),
+            date: Date { year: 2026, month: 5, day: 2 },
         };
         assert!(cl.release(&opts).is_err());
     }

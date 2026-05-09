@@ -2,6 +2,7 @@ mod bump;
 mod changelog;
 mod cli;
 mod config;
+mod date;
 mod git;
 mod hooks;
 mod release;
