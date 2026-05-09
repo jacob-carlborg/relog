@@ -130,7 +130,7 @@ Parsing and decision logic are kept separate from side effects:
 | `src/git.rs` | Thin wrapper around the `git` CLI |
 | `src/hooks.rs` | Phase-based hook runner |
 | `src/release.rs` | Orchestrator |
-| `src/cli.rs` | clap-based CLI |
+| `src/cli.rs` | Argument parser + entry point |
 
 Run the tests:
 
