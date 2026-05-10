@@ -115,7 +115,8 @@ jobs:
             (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
           fi
 
-      - name: Attach to draft release
+      - &attach_release
+        name: Attach to draft release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -216,32 +217,7 @@ jobs:
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
 
-      - name: Attach to draft release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="$GITHUB_REF_NAME"
-          state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
-          case "$state" in
-            false)
-              echo "::error::release $tag exists but is not a draft" >&2
-              exit 1
-              ;;
-            true)
-              gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber
-              ;;
-            missing)
-              gh release create "$tag" \
-                --title "$tag" \
-                --draft \
-                --generate-notes \
-                dist/*.tar.gz dist/*.sha256
-              ;;
-          esac
+      - *attach_release
 
   build-vm:
     name: Build (${{ matrix.name }})
@@ -348,29 +324,4 @@ jobs:
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
 
-      - name: Attach to draft release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="$GITHUB_REF_NAME"
-          state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
-          case "$state" in
-            false)
-              echo "::error::release $tag exists but is not a draft" >&2
-              exit 1
-              ;;
-            true)
-              gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber
-              ;;
-            missing)
-              gh release create "$tag" \
-                --title "$tag" \
-                --draft \
-                --generate-notes \
-                dist/*.tar.gz dist/*.sha256
-              ;;
-          esac
+      - *attach_release
