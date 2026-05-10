@@ -30,7 +30,7 @@ jobs:
 
       - run: cargo test --locked
 
-  build:
+  build-native:
     name: Build (${{ matrix.name }})
     needs: test
     runs-on: ${{ matrix.runner }}
@@ -38,189 +38,137 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ----- Linux: native musl (fully static) -----
+          # Linux: native musl (fully static)
           - name: linux-x86_64
-            kind: linux
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
           - name: linux-arm64
-            kind: linux
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-
-          # ----- Linux: native musl build inside an Alpine container under QEMU -----
-          - name: linux-arm
-            kind: linux-docker
-            runner: ubuntu-latest
-            docker_platform: linux/arm/v7
-          - name: linux-x86
-            kind: linux-docker
-            runner: ubuntu-latest
-            docker_platform: linux/386
-          - name: linux-riscv64
-            kind: linux-docker
-            runner: ubuntu-latest
-            docker_platform: linux/riscv64
-          - name: linux-ppc64le
-            kind: linux-docker
-            runner: ubuntu-latest
-            docker_platform: linux/ppc64le
-          - name: linux-s390x
-            kind: linux-docker
-            runner: ubuntu-latest
-            docker_platform: linux/s390x
-
-          # ----- macOS (oldest deployment target rustc supports per arch) -----
+          # macOS
           - name: macos-x86_64
-            kind: macos
             runner: macos-26-intel
             target: x86_64-apple-darwin
           - name: macos-arm64
-            kind: macos
             runner: macos-latest
             target: aarch64-apple-darwin
-
-          # ----- Windows (oldest is Windows 10 with current rustc) -----
+          # Windows
           - name: windows-x86_64
-            kind: windows
             runner: windows-latest
             target: x86_64-pc-windows-msvc
           - name: windows-arm64
-            kind: windows
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
-
-          # ----- OpenBSD -----
-          - name: openbsd-7.8-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: openbsd
-            vm_version: '7.8'
-            vm_arch: x86-64
-          - name: openbsd-7.8-arm64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: openbsd
-            vm_version: '7.8'
-            vm_arch: arm64
-
-          # ----- FreeBSD -----
-          - name: freebsd-15.0-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: freebsd
-            vm_version: '15.0'
-            vm_arch: x86-64
-          - name: freebsd-15.0-arm64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: freebsd
-            vm_version: '15.0'
-            vm_arch: arm64
-          - name: freebsd-14.0-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: freebsd
-            vm_version: '14.0'
-            vm_arch: x86-64
-          - name: freebsd-14.0-arm64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: freebsd
-            vm_version: '14.0'
-            vm_arch: arm64
-
-          # ----- NetBSD -----
-          - name: netbsd-10.0-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: netbsd
-            vm_version: '10.0'
-            vm_arch: x86-64
-          - name: netbsd-10.0-arm64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: netbsd
-            vm_version: '10.0'
-            vm_arch: arm64
-          - name: netbsd-9.4-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: netbsd
-            vm_version: '9.4'
-            vm_arch: x86-64
-
-          # ----- DragonFlyBSD -----
-          - name: dragonflybsd-6.4.2-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: dragonflybsd
-            vm_version: '6.4.2'
-            vm_arch: x86-64
-
-          # ----- MidnightBSD -----
-          - name: midnightbsd-4.0.4-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: midnightbsd
-            vm_version: '4.0.4'
-            vm_arch: x86-64
-
-          # ----- Haiku -----
-          - name: haiku-r1beta5-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: haiku
-            vm_version: 'r1beta5'
-            vm_arch: x86-64
-
-          # ----- OmniOS -----
-          - name: omnios-r151058-x86_64
-            kind: vm
-            runner: ubuntu-latest
-            vm_os: omnios
-            vm_version: 'r151058'
-            vm_arch: x86-64
-
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Verify tag matches Cargo.toml version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          crate=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          if [[ "$tag" != "$crate" ]]; then
-            echo "tag '$GITHUB_REF_NAME' does not match Cargo.toml version '$crate'" >&2
-            exit 1
-          fi
-
-      # ---- Toolchain target (host runners only; rustup is preinstalled) ----
       - name: Add Rust target
-        if: matrix.kind == 'linux' || matrix.kind == 'macos' || matrix.kind == 'windows'
         shell: bash
         run: rustup target add ${{ matrix.target }}
 
-      # ---- Linux: musl-tools for native build ----
       - name: Install musl tools
-        if: matrix.kind == 'linux'
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      # ---- Linux cross-arch: register QEMU binfmt handlers ----
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Verify binary is fully static
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/relog"
+          file "$bin"
+          if file "$bin" | grep -qE 'dynamically linked'; then
+            echo "::error::binary is dynamically linked" >&2
+            exit 1
+          fi
+          if ! file "$bin" | grep -q 'statically linked'; then
+            echo "::error::binary is not statically linked" >&2
+            exit 1
+          fi
+          if readelf -l "$bin" | grep -q 'INTERP'; then
+            echo "::error::binary has dynamic interpreter" >&2
+            readelf -l "$bin" >&2
+            exit 1
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          name="relog-v${version}-${{ matrix.name }}"
+          bin_name="relog"
+          [[ "${{ runner.os }}" == "Windows" ]] && bin_name="relog.exe"
+          src="target/${{ matrix.target }}/release/${bin_name}"
+
+          mkdir -p "dist/${name}"
+          cp "$src" "dist/${name}/"
+          [[ -f readme.md ]] && cp readme.md "dist/${name}/" || true
+          tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          fi
+
+      - name: Attach to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          case "$state" in
+            false)
+              echo "::error::release $tag exists but is not a draft" >&2
+              exit 1
+              ;;
+            true)
+              gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber
+              ;;
+            missing)
+              gh release create "$tag" \
+                --title "$tag" \
+                --draft \
+                --generate-notes \
+                dist/*.tar.gz dist/*.sha256
+              ;;
+          esac
+
+  build-qemu:
+    name: Build (${{ matrix.name }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-arm
+            docker_platform: linux/arm/v7
+          - name: linux-x86
+            docker_platform: linux/386
+          - name: linux-riscv64
+            docker_platform: linux/riscv64
+          - name: linux-ppc64le
+            docker_platform: linux/ppc64le
+          - name: linux-s390x
+            docker_platform: linux/s390x
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Set up QEMU
-        if: matrix.kind == 'linux-docker'
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
         with:
           platforms: ${{ matrix.docker_platform }}
 
-      # ---- Build ----
-      - name: Build (Linux native musl)
-        if: matrix.kind == 'linux'
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
-      - name: Build (Linux in Alpine container under QEMU)
-        if: matrix.kind == 'linux-docker'
+      - name: Build in Alpine container under QEMU
         run: |
           docker run --rm \
             -v "$PWD:/work" \
@@ -235,16 +183,137 @@ jobs:
               cargo build --release --locked
             '
 
-      - name: Build (macOS)
-        if: matrix.kind == 'macos'
-        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Verify binary is fully static
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/release/relog"
+          file "$bin"
+          if file "$bin" | grep -qE 'dynamically linked'; then
+            echo "::error::binary is dynamically linked" >&2
+            exit 1
+          fi
+          if ! file "$bin" | grep -q 'statically linked'; then
+            echo "::error::binary is not statically linked" >&2
+            exit 1
+          fi
+          if readelf -l "$bin" | grep -q 'INTERP'; then
+            echo "::error::binary has dynamic interpreter" >&2
+            readelf -l "$bin" >&2
+            exit 1
+          fi
 
-      - name: Build (Windows)
-        if: matrix.kind == 'windows'
-        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          name="relog-v${version}-${{ matrix.name }}"
 
-      - name: Build (VM)
-        if: matrix.kind == 'vm'
+          mkdir -p "dist/${name}"
+          cp "target/release/relog" "dist/${name}/"
+          [[ -f readme.md ]] && cp readme.md "dist/${name}/" || true
+          tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+
+      - name: Attach to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          case "$state" in
+            false)
+              echo "::error::release $tag exists but is not a draft" >&2
+              exit 1
+              ;;
+            true)
+              gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber
+              ;;
+            missing)
+              gh release create "$tag" \
+                --title "$tag" \
+                --draft \
+                --generate-notes \
+                dist/*.tar.gz dist/*.sha256
+              ;;
+          esac
+
+  build-vm:
+    name: Build (${{ matrix.name }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # OpenBSD
+          - name: openbsd-7.8-x86_64
+            vm_os: openbsd
+            vm_version: '7.8'
+            vm_arch: x86-64
+          - name: openbsd-7.8-arm64
+            vm_os: openbsd
+            vm_version: '7.8'
+            vm_arch: arm64
+          # FreeBSD
+          - name: freebsd-15.0-x86_64
+            vm_os: freebsd
+            vm_version: '15.0'
+            vm_arch: x86-64
+          - name: freebsd-15.0-arm64
+            vm_os: freebsd
+            vm_version: '15.0'
+            vm_arch: arm64
+          - name: freebsd-14.0-x86_64
+            vm_os: freebsd
+            vm_version: '14.0'
+            vm_arch: x86-64
+          - name: freebsd-14.0-arm64
+            vm_os: freebsd
+            vm_version: '14.0'
+            vm_arch: arm64
+          # NetBSD
+          - name: netbsd-10.0-x86_64
+            vm_os: netbsd
+            vm_version: '10.0'
+            vm_arch: x86-64
+          - name: netbsd-10.0-arm64
+            vm_os: netbsd
+            vm_version: '10.0'
+            vm_arch: arm64
+          - name: netbsd-9.4-x86_64
+            vm_os: netbsd
+            vm_version: '9.4'
+            vm_arch: x86-64
+          # DragonFlyBSD
+          - name: dragonflybsd-6.4.2-x86_64
+            vm_os: dragonflybsd
+            vm_version: '6.4.2'
+            vm_arch: x86-64
+          # MidnightBSD
+          - name: midnightbsd-4.0.4-x86_64
+            vm_os: midnightbsd
+            vm_version: '4.0.4'
+            vm_arch: x86-64
+          # Haiku
+          - name: haiku-r1beta5-x86_64
+            vm_os: haiku
+            vm_version: 'r1beta5'
+            vm_arch: x86-64
+          # OmniOS
+          - name: omnios-r151058-x86_64
+            vm_os: omnios
+            vm_version: 'r151058'
+            vm_arch: x86-64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build in VM
         uses: cross-platform-actions/action@233156312992f3f169d8d0c633c21d12a5d30455 # v1.0.0
         with:
           operating_system: ${{ matrix.vm_os }}
@@ -266,33 +335,6 @@ jobs:
             esac
             cargo build --release --locked
 
-      # ---- Verify Linux binaries are fully static ----
-      - name: Verify Linux binary is fully static
-        if: startsWith(matrix.kind, 'linux')
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ matrix.kind }}" == "linux-docker" ]]; then
-            bin="target/release/relog"
-          else
-            bin="target/${{ matrix.target }}/release/relog"
-          fi
-          file "$bin"
-          if file "$bin" | grep -qE 'dynamically linked'; then
-            echo "::error::binary is dynamically linked" >&2
-            exit 1
-          fi
-          if ! file "$bin" | grep -q 'statically linked'; then
-            echo "::error::binary is not statically linked" >&2
-            exit 1
-          fi
-          if command -v readelf >/dev/null && readelf -l "$bin" | grep -q 'INTERP'; then
-            echo "::error::binary has dynamic interpreter" >&2
-            readelf -l "$bin" >&2
-            exit 1
-          fi
-
-      # ---- Package ----
       - name: Package
         shell: bash
         run: |
@@ -300,33 +342,12 @@ jobs:
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
           name="relog-v${version}-${{ matrix.name }}"
 
-          bin_name="relog"
-          if [[ "${{ matrix.kind }}" == "windows" ]]; then
-            bin_name="relog.exe"
-          fi
-
-          if [[ "${{ matrix.kind }}" == "vm" || "${{ matrix.kind }}" == "linux-docker" ]]; then
-            src="target/release/${bin_name}"
-          else
-            src="target/${{ matrix.target }}/release/${bin_name}"
-          fi
-
           mkdir -p "dist/${name}"
-          cp "$src" "dist/${name}/"
+          cp "target/release/relog" "dist/${name}/"
           [[ -f readme.md ]] && cp readme.md "dist/${name}/" || true
-
           tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
 
-          if command -v sha256sum >/dev/null 2>&1; then
-            (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
-          else
-            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
-          fi
-
-      # ---- Attach to draft release (tag pushes only) ----
-      # Matrix jobs run in parallel; the first to arrive creates the draft
-      # release, the rest upload their artifacts to it. `gh release create`
-      # with --draft does NOT deduplicate by tag, so we have to check first.
       - name: Attach to draft release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
