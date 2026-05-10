@@ -26,8 +26,8 @@ impl Plan {
     ///   - the [Unreleased] section is non-empty (or `version` was passed explicitly)
     ///   - the version is greater than the previous one
     pub fn build(root: &Path, explicit_version: Option<Version>) -> Result<Self> {
-        let config = Config::load(root)?;
-        let git = Git::new(&config.root);
+        let git = Git::new(root);
+        let config = Config::load(root, || git.detect_default_branch())?;
 
         let changelog_text = std::fs::read_to_string(&config.changelog)
             .with_context(|| format!("reading {}", config.changelog.display()))?;

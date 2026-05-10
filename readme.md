@@ -68,14 +68,15 @@ is a major bump.
 
 If the `[Unreleased]` section is empty, `relog` refuses to release.
 
-## Configuration: `.release.conf`
+## Configuration: `release.conf`
 
 Optional file at the repository root. Every field has a sensible default:
 
 ```ini
 # falls back to changelog.md / CHANGELOG.md / Changelog.md if not set
 changelog = changelog.md
-branch    = master
+# defaults to `main` if it exists, otherwise `master`
+branch    = main
 remote    = origin
 
 # `pre_commit` may repeat; each occurrence is one command run before
@@ -126,7 +127,7 @@ Parsing and decision logic are kept separate from side effects:
 |---|---|
 | `src/changelog.rs` | Read-only KaC parser + pure rewriter |
 | `src/bump.rs` | Pure bump detection |
-| `src/config.rs` | `.release.conf` loader |
+| `src/config.rs` | `release.conf` loader |
 | `src/git.rs` | Thin wrapper around the `git` CLI |
 | `src/hooks.rs` | Phase-based hook runner |
 | `src/release.rs` | Orchestrator |

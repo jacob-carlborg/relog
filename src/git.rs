@@ -40,6 +40,34 @@ impl Git {
         Ok(String::from_utf8(out.stdout)?.trim().to_string())
     }
 
+    /// True if a local branch with this name exists.
+    pub fn branch_exists(&self, name: &str) -> Result<bool> {
+        let mut cmd = self.command();
+        cmd.args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ]);
+        let out = cmd
+            .output()
+            .with_context(|| format!("running `git rev-parse refs/heads/{name}`"))?;
+        Ok(out.status.success())
+    }
+
+    /// Pick a default branch when one isn't configured: prefer `main`, fall back to `master`.
+    pub fn detect_default_branch(&self) -> Result<String> {
+        if self.branch_exists("main")? {
+            Ok("main".to_string())
+        } else if self.branch_exists("master")? {
+            Ok("master".to_string())
+        } else {
+            bail!(
+                "no `branch` set in release.conf and could not find a `main` or `master` branch"
+            )
+        }
+    }
+
     pub fn is_clean_working_tree(&self) -> Result<bool> {
         // Only flag modifications to tracked files; untracked files don't block a release.
         let out = self.run(["status", "--porcelain", "--untracked-files=no"])?;

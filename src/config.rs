@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-const CONFIG_FILENAME: &str = ".release.conf";
+const CONFIG_FILENAME: &str = "release.conf";
 const CHANGELOG_CANDIDATES: &[&str] = &["changelog.md", "CHANGELOG.md", "Changelog.md"];
 
 #[derive(Debug, Clone)]
@@ -23,8 +23,15 @@ struct RawConfig {
 }
 
 impl Config {
-    /// Load config from `<root>/.release.conf`, falling back to defaults if absent.
-    pub fn load(root: &Path) -> Result<Self> {
+    /// Load config from `<root>/release.conf`, falling back to defaults if absent.
+    ///
+    /// `default_branch` is invoked only when the config file does not set `branch`.
+    /// It is a closure so callers can detect the default from the live repo (e.g.
+    /// "use `main` if it exists, else `master`") without coupling this module to git.
+    pub fn load<F>(root: &Path, default_branch: F) -> Result<Self>
+    where
+        F: FnOnce() -> Result<String>,
+    {
         let path = root.join(CONFIG_FILENAME);
         let raw = if path.exists() {
             let text = std::fs::read_to_string(&path)
@@ -45,10 +52,15 @@ impl Config {
             })?,
         };
 
+        let branch = match raw.branch {
+            Some(b) => b,
+            None => default_branch()?,
+        };
+
         Ok(Self {
             root: root.to_path_buf(),
             changelog,
-            branch: raw.branch.unwrap_or_else(|| "master".to_string()),
+            branch,
             remote: raw.remote.unwrap_or_else(|| "origin".to_string()),
             pre_commit: raw.pre_commit,
         })
@@ -116,7 +128,7 @@ mod tests {
     fn defaults_when_no_config_file() {
         let dir = tmp_dir();
         fs::write(dir.join("changelog.md"), "# x").unwrap();
-        let cfg = Config::load(&dir).unwrap();
+        let cfg = Config::load(&dir, || Ok("master".to_string())).unwrap();
         assert_eq!(cfg.branch, "master");
         assert_eq!(cfg.remote, "origin");
         assert_eq!(cfg.changelog, dir.join("changelog.md"));
@@ -129,7 +141,7 @@ mod tests {
         let dir = tmp_dir();
         fs::write(dir.join("CHANGELOG.md"), "# x").unwrap();
         fs::write(
-            dir.join(".release.conf"),
+            dir.join("release.conf"),
             "\
 # example config
 changelog = CHANGELOG.md
@@ -140,7 +152,7 @@ pre_commit = ./scripts/update-readme.sh
 ",
         )
         .unwrap();
-        let cfg = Config::load(&dir).unwrap();
+        let cfg = Config::load(&dir, || Ok("master".to_string())).unwrap();
         assert_eq!(cfg.branch, "main");
         assert_eq!(cfg.remote, "upstream");
         assert_eq!(cfg.changelog, dir.join("CHANGELOG.md"));
@@ -149,11 +161,24 @@ pre_commit = ./scripts/update-readme.sh
     }
 
     #[test]
+    fn default_branch_closure_runs_only_when_branch_is_unset() {
+        let dir = tmp_dir();
+        fs::write(dir.join("changelog.md"), "# x").unwrap();
+        fs::write(dir.join("release.conf"), "branch = trunk\n").unwrap();
+        let cfg = Config::load(&dir, || {
+            panic!("default_branch should not be called when `branch` is set")
+        })
+        .unwrap();
+        assert_eq!(cfg.branch, "trunk");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn repeated_hook_keys_accumulate_in_order() {
         let dir = tmp_dir();
         fs::write(dir.join("changelog.md"), "# x").unwrap();
         fs::write(
-            dir.join(".release.conf"),
+            dir.join("release.conf"),
             "\
 pre_commit = first
 pre_commit = second
@@ -161,7 +186,7 @@ pre_commit = third
 ",
         )
         .unwrap();
-        let cfg = Config::load(&dir).unwrap();
+        let cfg = Config::load(&dir, || Ok("master".to_string())).unwrap();
         assert_eq!(cfg.pre_commit, vec!["first", "second", "third"]);
         fs::remove_dir_all(&dir).ok();
     }
@@ -170,8 +195,8 @@ pre_commit = third
     fn unknown_key_is_a_parse_error() {
         let dir = tmp_dir();
         fs::write(dir.join("changelog.md"), "# x").unwrap();
-        fs::write(dir.join(".release.conf"), "wat = 1\n").unwrap();
-        let err = Config::load(&dir).unwrap_err();
+        fs::write(dir.join("release.conf"), "wat = 1\n").unwrap();
+        let err = Config::load(&dir, || Ok("master".to_string())).unwrap_err();
         assert!(err.to_string().contains("parsing") || format!("{err:#}").contains("unknown key"));
         fs::remove_dir_all(&dir).ok();
     }
@@ -180,8 +205,8 @@ pre_commit = third
     fn line_without_equals_is_a_parse_error() {
         let dir = tmp_dir();
         fs::write(dir.join("changelog.md"), "# x").unwrap();
-        fs::write(dir.join(".release.conf"), "branch main\n").unwrap();
-        let err = Config::load(&dir).unwrap_err();
+        fs::write(dir.join("release.conf"), "branch main\n").unwrap();
+        let err = Config::load(&dir, || Ok("master".to_string())).unwrap_err();
         assert!(format!("{err:#}").contains("expected `key = value`"));
         fs::remove_dir_all(&dir).ok();
     }
@@ -191,11 +216,11 @@ pre_commit = third
         let dir = tmp_dir();
         fs::write(dir.join("changelog.md"), "# x").unwrap();
         fs::write(
-            dir.join(".release.conf"),
+            dir.join("release.conf"),
             "pre_commit = sh -c 'git config user.email=ci@example.com && git add x'\n",
         )
         .unwrap();
-        let cfg = Config::load(&dir).unwrap();
+        let cfg = Config::load(&dir, || Ok("master".to_string())).unwrap();
         assert_eq!(
             cfg.pre_commit,
             vec!["sh -c 'git config user.email=ci@example.com && git add x'"]
@@ -206,7 +231,7 @@ pre_commit = third
     #[test]
     fn errors_when_no_changelog_anywhere() {
         let dir = tmp_dir();
-        let err = Config::load(&dir).unwrap_err();
+        let err = Config::load(&dir, || Ok("master".to_string())).unwrap_err();
         assert!(err.to_string().contains("no changelog"));
         fs::remove_dir_all(&dir).ok();
     }
@@ -215,7 +240,7 @@ pre_commit = third
     fn detects_changelog_when_only_uppercase_present() {
         let dir = tmp_dir();
         fs::write(dir.join("CHANGELOG.md"), "# x").unwrap();
-        let cfg = Config::load(&dir).unwrap();
+        let cfg = Config::load(&dir, || Ok("master".to_string())).unwrap();
         // On case-insensitive filesystems any of the candidate paths resolves to the
         // same file; what we care about is that detection succeeded and points at a
         // real file in the right directory.
