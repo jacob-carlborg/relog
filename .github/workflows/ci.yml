@@ -28,8 +28,6 @@ jobs:
             exit 1
           fi
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-
       - run: cargo test --locked
 
   build:
@@ -203,11 +201,6 @@ jobs:
         if: matrix.kind == 'linux' || matrix.kind == 'macos' || matrix.kind == 'windows'
         shell: bash
         run: rustup target add ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: matrix.kind == 'linux' || matrix.kind == 'macos' || matrix.kind == 'windows'
-        with:
-          key: ${{ matrix.target }}
 
       # ---- Linux: musl-tools for native build ----
       - name: Install musl tools
