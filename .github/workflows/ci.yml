@@ -227,6 +227,9 @@ jobs:
     name: Build (${{ matrix.name }})
     needs: test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: cpa.sh {0}
     strategy:
       fail-fast: false
       matrix:
@@ -293,27 +296,35 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Build in VM
+      - name: Boot VM
         uses: cross-platform-actions/action@master
         with:
           operating_system: ${{ matrix.vm_os }}
           version: ${{ matrix.vm_version }}
           architecture: ${{ matrix.vm_arch }}
           shell: bash
-          sync_files: true
-          run: |
-            set -e
-            case "$(uname -s)" in
-              OpenBSD)     sudo pkg_add -I rust ;;
-              FreeBSD)     sudo pkg install -y rust ;;
-              NetBSD)      sudo pkgin -y install mozilla-rootcerts-openssl rust ;;
-              DragonFly)   sudo pkg install -y rust ;;
-              MidnightBSD) sudo mport install -y rust ;;
-              Haiku)       pkgman install -y rust_bin ;;
-              SunOS)       sudo pkg install -q rust ;;
-              *)           echo "no rust install recipe for $(uname -s)" >&2; exit 1 ;;
-            esac
-            cargo build --release --locked
+
+      # Haiku's pkgman transitively upgrades zlib, which drops the SSH/rsync
+      # session before this step's post-sync completes. The install itself
+      # finishes on disk; the next step opens a fresh SSH connection to the
+      # same (still-running) VM.
+      - name: Install Rust
+        continue-on-error: ${{ matrix.vm_os == 'haiku' }}
+        run: |
+          set -e
+          case "$(uname -s)" in
+            OpenBSD)     sudo pkg_add -I rust ;;
+            FreeBSD)     sudo pkg install -y rust ;;
+            NetBSD)      sudo pkgin -y install mozilla-rootcerts-openssl rust ;;
+            DragonFly)   sudo pkg install -y rust ;;
+            MidnightBSD) sudo mport install -y rust ;;
+            Haiku)       pkgman install -y rust_bin ;;
+            SunOS)       sudo pkg install -q rust ;;
+            *)           echo "no rust install recipe for $(uname -s)" >&2; exit 1 ;;
+          esac
+
+      - name: Build
+        run: cargo build --release --locked
 
       - name: Package
         shell: bash
