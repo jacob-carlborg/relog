@@ -17,14 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - if: env.ACT
+        run: apt update && apt install cargo
+
       - name: Verify tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
+        env:
+          tag: github.ref_name
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          crate=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          if [[ "$tag" != "$crate" ]]; then
-            echo "tag '$GITHUB_REF_NAME' does not match Cargo.toml version '$crate'" >&2
+          version="${tag#v}"
+          crate=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "relog") | .version')
+          if [[ "$version" != "$crate" ]]; then
+            echo "tag '$version' does not match Cargo.toml version '$crate'" >&2
             exit 1
           fi
 
@@ -100,8 +105,7 @@ jobs:
           set -euo pipefail
           version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
           name="relog-v${version}-${{ matrix.name }}"
-          bin_name="relog"
-          [[ "${{ runner.os }}" == "Windows" ]] && bin_name="relog.exe"
+          bin_name="$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "relog") | .targets[]  | select(.kind[] | contains("bin")) | .name')"
           src="target/${{ matrix.target }}/release/${bin_name}"
 
           mkdir -p "dist/${name}"
@@ -121,10 +125,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          tag: github.ref_name
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
           state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
           case "$state" in
             false)
