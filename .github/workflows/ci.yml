@@ -89,7 +89,7 @@ jobs:
             echo "::error::binary is dynamically linked" >&2
             exit 1
           fi
-          if ! file "$bin" | grep -q 'statically linked'; then
+          if ! file "$bin" | grep -qE 'statically linked|static-pie linked'; then
             echo "::error::binary is not statically linked" >&2
             exit 1
           fi
@@ -198,7 +198,7 @@ jobs:
             echo "::error::binary is dynamically linked" >&2
             exit 1
           fi
-          if ! file "$bin" | grep -q 'statically linked'; then
+          if ! file "$bin" | grep -qE 'statically linked|static-pie linked'; then
             echo "::error::binary is not statically linked" >&2
             exit 1
           fi
