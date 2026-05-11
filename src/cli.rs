@@ -70,7 +70,8 @@ fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Action> {
                 };
                 out.chdir = Some(PathBuf::from(value));
             }
-            s if let Some(value) = s.strip_prefix("--chdir=") => {
+            s if s.starts_with("--chdir=") => {
+                let value = s.strip_prefix("--chdir=").unwrap();
                 out.chdir = Some(PathBuf::from(value));
             }
             s if s.starts_with("--") => bail!("unknown option: {s}"),
