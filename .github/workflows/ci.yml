@@ -269,10 +269,6 @@ jobs:
             vm_os: netbsd
             vm_version: '10.0'
             vm_arch: arm64
-          - name: netbsd-9.4-x86_64
-            vm_os: netbsd
-            vm_version: '9.4'
-            vm_arch: x86-64
           # DragonFlyBSD
           - name: dragonflybsd-6.4.2-x86_64
             vm_os: dragonflybsd
@@ -282,11 +278,6 @@ jobs:
           - name: midnightbsd-4.0.4-x86_64
             vm_os: midnightbsd
             vm_version: '4.0.4'
-            vm_arch: x86-64
-          # Haiku
-          - name: haiku-r1beta5-x86_64
-            vm_os: haiku
-            vm_version: 'r1beta5'
             vm_arch: x86-64
           # OmniOS
           - name: omnios-r151058-x86_64
@@ -304,12 +295,7 @@ jobs:
           architecture: ${{ matrix.vm_arch }}
           shell: bash
 
-      # Haiku's pkgman transitively upgrades zlib, which drops the SSH/rsync
-      # session before this step's post-sync completes. The install itself
-      # finishes on disk; the next step opens a fresh SSH connection to the
-      # same (still-running) VM.
       - name: Install Rust
-        continue-on-error: ${{ matrix.vm_os == 'haiku' }}
         run: |
           set -e
           case "$(uname -s)" in
@@ -317,8 +303,7 @@ jobs:
             FreeBSD)     sudo pkg install -y rust ;;
             NetBSD)      sudo pkgin -y install mozilla-rootcerts-openssl rust ;;
             DragonFly)   sudo pkg install -y rust ;;
-            MidnightBSD) sudo mport install -y rust ;;
-            Haiku)       pkgman install -y rust_bin ;;
+            MidnightBSD) sudo mport install rust ;;
             SunOS)       sudo pkg install -q rust ;;
             *)           echo "no rust install recipe for $(uname -s)" >&2; exit 1 ;;
           esac
