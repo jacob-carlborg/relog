@@ -274,11 +274,6 @@ jobs:
             vm_os: dragonflybsd
             vm_version: '6.4.2'
             vm_arch: x86-64
-          # MidnightBSD
-          - name: midnightbsd-4.0.4-x86_64
-            vm_os: midnightbsd
-            vm_version: '4.0.4'
-            vm_arch: x86-64
           # OmniOS
           - name: omnios-r151058-x86_64
             vm_os: omnios
@@ -303,7 +298,6 @@ jobs:
             FreeBSD)     sudo pkg install -y rust ;;
             NetBSD)      sudo pkgin -y install mozilla-rootcerts-openssl rust ;;
             DragonFly)   sudo pkg install -y rust ;;
-            MidnightBSD) sudo mport install rust ;;
             SunOS)       sudo pkg install -q rust ;;
             *)           echo "no rust install recipe for $(uname -s)" >&2; exit 1 ;;
           esac
