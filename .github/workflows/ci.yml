@@ -294,7 +294,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Build in VM
-        uses: cross-platform-actions/action@233156312992f3f169d8d0c633c21d12a5d30455 # v1.0.0
+        uses: cross-platform-actions/action@master
         with:
           operating_system: ${{ matrix.vm_os }}
           version: ${{ matrix.vm_version }}
@@ -306,7 +306,7 @@ jobs:
             case "$(uname -s)" in
               OpenBSD)     sudo pkg_add -I rust ;;
               FreeBSD)     sudo pkg install -y rust ;;
-              NetBSD)      sudo pkgin -y install rust ;;
+              NetBSD)      sudo pkgin -y install mozilla-rootcerts-openssl rust ;;
               DragonFly)   sudo pkg install -y rust ;;
               MidnightBSD) sudo mport install -y rust ;;
               Haiku)       pkgman install -y rust_bin ;;
